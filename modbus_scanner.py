@@ -11,14 +11,15 @@ The possible categories are:
 
 The script scans the RAW range from 0 to 9998 in blocks (default 50 registers per request)
 and waits a delay (default 4.0 seconds) after each block to avoid overloading the device.
-Each found result is printed in real time both on the console and, if specified,
-immediately appended to the output file.
+For each category, a header (including category and timestamp), the static register table,
+and the found results are appended to the output file in real time.
+
   
 Usage:
-  ./modbus_scanner.py --ip <IP_TARGET> [--port <PORT>] [--slave <ID>] [--block <block_size>] [--delay <seconds>] [--category <category1> <category2> ...] [--output report.txt]
+  ./modbus_scanner.py --ip <IP_TARGET> [--port <PORT>] [--slave <ID>] [--block <block_size>] [--delay <seconds>] [--category <category1> <category2> ...] [--output output.txt]
 
 Example:
-  ./modbus_scanner.py --ip 192.168.1.100 --port 502 --slave 1 --block 50 --delay 4.0 --category holding input --output modbus_report.txt
+  ./modbus_scanner.py --ip 192.168.1.100 --port 502 --slave 1 --block 50 --delay 4.0 --category holding input --output output.txt
 """
 
 import argparse
@@ -26,6 +27,7 @@ import time
 import math
 from pymodbus.client import ModbusTcpClient
 import sys
+import datetime
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -77,7 +79,6 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
         count = min(block_size, max_raw - raw)
         modbus_start = raw + offset
         modbus_end = raw + count - 1 + offset
-        # Show progress only in console
         print(f"[{function_type.upper()}] Scanning block {idx+1}/{total_blocks} (RAW {raw}-{raw+count-1} -> Modbus {modbus_start}-{modbus_end})", end="\r", flush=True)
         
         if function_type == "coil":
@@ -128,7 +129,7 @@ def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
 
 def main():
     args = parse_args()
-
+    
     realtime_file = None
     if args.output:
         realtime_file = open(args.output, "a", encoding="utf-8")
@@ -143,9 +144,25 @@ def main():
 
     try:
         for cat in categories:
-            print(f"\nStarting scan for category: {cat.upper()}")
-            scan_results[cat] = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999,
-                                              function_type=cat, slave=args.slave, result_file=realtime_file)
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            header = (
+                "\n============================\n"
+                f"Category: {cat.upper()} - {timestamp}\n"
+                f"{static_register_table_plain()}\n"
+                "----------------------------\n"
+            )
+            print(header)
+            if realtime_file:
+                realtime_file.write(header)
+                realtime_file.flush()
+            results = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999,
+                                    function_type=cat, slave=args.slave, result_file=realtime_file)
+            scan_results[cat] = results
+            footer = f"---- End of {cat.upper()} scan, registers read: {len(results)} ----\n"
+            print(footer)
+            if realtime_file:
+                realtime_file.write(footer)
+                realtime_file.flush()
     except KeyboardInterrupt:
         print("\nScan interrupted by user. Exiting...")
     finally:
@@ -153,13 +170,15 @@ def main():
         if realtime_file:
             realtime_file.close()
     
-    report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
-    print("\n" + report)
-    
+    final_report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
+    print("\nFinal Summary Report:")
+    print(final_report)
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(report + "\n")
-        print(f"\nReport written in {args.output}")
+        with open(args.output, "a", encoding="utf-8") as f:
+            summary_header = f"\n===== FINAL SUMMARY REPORT - {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====\n"
+            f.write(summary_header)
+            f.write(final_report + "\n")
+        print(f"\nFinal summary report appended in {args.output}")
 
 if __name__ == "__main__":
     main()
