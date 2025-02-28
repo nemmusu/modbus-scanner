@@ -11,8 +11,9 @@ The possible categories are:
 
 The script scans the RAW range from 0 to 9998 in blocks (default 50 registers per request)
 and waits a delay (default 4.0 seconds) after each block to avoid overloading the device.
-Each found result is printed in real time.
-The final report, containing only the scan results, is either printed or saved to an output file.
+Each found result is printed in real time both on the console and, if specified,
+immediately appended to the output file.
+
 
 Usage:
   ./modbus_scanner.py --ip <IP_TARGET> [--port <PORT>] [--slave <ID>] [--block <block_size>] [--delay <seconds>] [--category <category1> <category2> ...] [--output report.txt]
@@ -52,12 +53,12 @@ def static_register_table_plain():
     )
     return table
 
-def scan_category(client, block_size, delay, max_raw=9999, function_type="coil", slave=1):
+def scan_category(client, block_size, delay, max_raw=9999, function_type="coil", slave=1, result_file=None):
     """
     Scans the RAW range from 0 to max_raw-1 in blocks, using the corresponding Modbus function.
     function_type can be "coil", "discrete", "holding", or "input".
     Inserts a delay after each block to avoid overloading the device.
-    Each found result is printed in real time.
+    Each found result is printed in real time and, if provided, written to the output file.
     Returns a list of tuples (modbus_address, value).
     """
     results = []
@@ -77,8 +78,8 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
         count = min(block_size, max_raw - raw)
         modbus_start = raw + offset
         modbus_end = raw + count - 1 + offset
-        # Only print progress to the console, not saved in the final log
         print(f"[{function_type.upper()}] Scanning block {idx+1}/{total_blocks} (RAW {raw}-{raw+count-1} -> Modbus {modbus_start}-{modbus_end})", end="\r", flush=True)
+        
         if function_type == "coil":
             response = client.read_coils(raw, count, unit=slave)
         elif function_type == "discrete":
@@ -96,7 +97,11 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
             for i, val in enumerate(registers):
                 modbus_addr = raw + i + offset
                 results.append((modbus_addr, val))
-                print(f"Found: {modbus_addr} -> {val}")
+                line = f"Found: {modbus_addr} -> {val}"
+                print(line)
+                if result_file:
+                    result_file.write(line + "\n")
+                    result_file.flush()
         time.sleep(delay)
     print(f"\n[{function_type.upper()}] Scanning complete. Registers read: {len(results)}")
     return results
@@ -123,6 +128,10 @@ def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
 
 def main():
     args = parse_args()
+
+    result_file = None
+    if args.output:
+        result_file = open(args.output, "a", encoding="utf-8")
     
     client = ModbusTcpClient(args.ip, args.port)
     if not client.connect():
@@ -135,19 +144,17 @@ def main():
     try:
         for cat in categories:
             print(f"\nStarting scan for category: {cat.upper()}")
-            scan_results[cat] = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999, function_type=cat, slave=args.slave)
+            scan_results[cat] = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999,
+                                              function_type=cat, slave=args.slave, result_file=result_file)
     except KeyboardInterrupt:
-        print("\nScan interrupted by user. Exiting gracefully.")
+        print("\nScan interrupted by user. Exiting...")
     finally:
         client.close()
-
+        if result_file:
+            result_file.close()
+    
     report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
-    if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(report + "\n")
-        print(f"\nReport written in {args.output}")
-    else:
-        print("\n" + report)
+    print("\n" + report)
 
 if __name__ == "__main__":
     main()
