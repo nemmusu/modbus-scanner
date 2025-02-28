@@ -11,13 +11,14 @@ The possible categories are:
 
 The script scans the RAW range from 0 to 9998 in blocks (default 50 registers per request)
 and waits a delay (default 4.0 seconds) after each block to avoid overloading the device.
-Logs are written in real time to the output file (if specified).
+Each found result is printed in real time.
+The final report, containing only the scan results, is either printed or saved to an output file.
 
 Usage:
   ./modbus_scanner.py --ip <IP_TARGET> [--port <PORT>] [--slave <ID>] [--block <block_size>] [--delay <seconds>] [--category <category1> <category2> ...] [--output report.txt]
 
 Example:
-  ./modbus_scanner.py --ip 192.168.1.100 --port 502 --slave 1 --block 50 --delay 4 --category holding input --output modbus_report.txt
+  ./modbus_scanner.py --ip 192.168.1.100 --port 502 --slave 1 --block 50 --delay 4.0 --category holding input --output modbus_report.txt
 """
 
 import argparse
@@ -51,12 +52,12 @@ def static_register_table_plain():
     )
     return table
 
-def scan_category(client, block_size, delay, max_raw=9999, function_type="coil", slave=1, log_file=None):
+def scan_category(client, block_size, delay, max_raw=9999, function_type="coil", slave=1):
     """
     Scans the RAW range from 0 to max_raw-1 in blocks, using the corresponding Modbus function.
     function_type can be "coil", "discrete", "holding", or "input".
     Inserts a delay after each block to avoid overloading the device.
-    If log_file is specified, writes log messages in real time.
+    Each found result is printed in real time.
     Returns a list of tuples (modbus_address, value).
     """
     results = []
@@ -76,11 +77,8 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
         count = min(block_size, max_raw - raw)
         modbus_start = raw + offset
         modbus_end = raw + count - 1 + offset
-        progress_msg = f"[{function_type.upper()}] Scanning block {idx+1}/{total_blocks} (RAW {raw}-{raw+count-1} -> Modbus {modbus_start}-{modbus_end})"
-        print(progress_msg, end="\r", flush=True)
-        if log_file:
-            log_file.write(progress_msg + "\n")
-            log_file.flush()
+        # Only print progress to the console, not saved in the final log
+        print(f"[{function_type.upper()}] Scanning block {idx+1}/{total_blocks} (RAW {raw}-{raw+count-1} -> Modbus {modbus_start}-{modbus_end})", end="\r", flush=True)
         if function_type == "coil":
             response = client.read_coils(raw, count, unit=slave)
         elif function_type == "discrete":
@@ -98,12 +96,9 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
             for i, val in enumerate(registers):
                 modbus_addr = raw + i + offset
                 results.append((modbus_addr, val))
+                print(f"Found: {modbus_addr} -> {val}")
         time.sleep(delay)
-    completion_msg = f"[{function_type.upper()}] Scanning complete. Registers read: {len(results)}"
-    print(completion_msg)
-    if log_file:
-        log_file.write(completion_msg + "\n")
-        log_file.flush()
+    print(f"\n[{function_type.upper()}] Scanning complete. Registers read: {len(results)}")
     return results
 
 def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
@@ -129,10 +124,6 @@ def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
 def main():
     args = parse_args()
     
-    log_file = None
-    if args.output:
-        log_file = open(args.output, "a", encoding="utf-8")
-    
     client = ModbusTcpClient(args.ip, args.port)
     if not client.connect():
         print(f"Error: unable to connect to {args.ip}:{args.port}")
@@ -141,27 +132,22 @@ def main():
     categories = args.category if args.category is not None else ["coil", "discrete", "holding", "input"]
     scan_results = {}
 
-    for cat in categories:
-        msg = f"\nStarting scan for category: {cat.upper()}"
-        print(msg)
-        if log_file:
-            log_file.write(msg + "\n")
-            log_file.flush()
-        scan_results[cat] = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999, function_type=cat, slave=args.slave, log_file=log_file)
-    
-    client.close()
+    try:
+        for cat in categories:
+            print(f"\nStarting scan for category: {cat.upper()}")
+            scan_results[cat] = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999, function_type=cat, slave=args.slave)
+    except KeyboardInterrupt:
+        print("\nScan interrupted by user. Exiting gracefully.")
+    finally:
+        client.close()
 
-    if log_file:
-        log_file.close()
-
+    report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as f:
-            report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
             f.write(report + "\n")
         print(f"\nReport written in {args.output}")
     else:
-        print("\n" + generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results))
-
+        print("\n" + report)
 
 if __name__ == "__main__":
     main()
