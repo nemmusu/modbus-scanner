@@ -13,8 +13,7 @@ The script scans the RAW range from 0 to 9998 in blocks (default 50 registers pe
 and waits a delay (default 4.0 seconds) after each block to avoid overloading the device.
 Each found result is printed in real time both on the console and, if specified,
 immediately appended to the output file.
-
-
+  
 Usage:
   ./modbus_scanner.py --ip <IP_TARGET> [--port <PORT>] [--slave <ID>] [--block <block_size>] [--delay <seconds>] [--category <category1> <category2> ...] [--output report.txt]
 
@@ -78,6 +77,7 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
         count = min(block_size, max_raw - raw)
         modbus_start = raw + offset
         modbus_end = raw + count - 1 + offset
+        # Show progress only in console
         print(f"[{function_type.upper()}] Scanning block {idx+1}/{total_blocks} (RAW {raw}-{raw+count-1} -> Modbus {modbus_start}-{modbus_end})", end="\r", flush=True)
         
         if function_type == "coil":
@@ -129,9 +129,9 @@ def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
 def main():
     args = parse_args()
 
-    result_file = None
+    realtime_file = None
     if args.output:
-        result_file = open(args.output, "a", encoding="utf-8")
+        realtime_file = open(args.output, "a", encoding="utf-8")
     
     client = ModbusTcpClient(args.ip, args.port)
     if not client.connect():
@@ -145,16 +145,21 @@ def main():
         for cat in categories:
             print(f"\nStarting scan for category: {cat.upper()}")
             scan_results[cat] = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999,
-                                              function_type=cat, slave=args.slave, result_file=result_file)
+                                              function_type=cat, slave=args.slave, result_file=realtime_file)
     except KeyboardInterrupt:
         print("\nScan interrupted by user. Exiting...")
     finally:
         client.close()
-        if result_file:
-            result_file.close()
+        if realtime_file:
+            realtime_file.close()
     
     report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
     print("\n" + report)
+    
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(report + "\n")
+        print(f"\nReport written in {args.output}")
 
 if __name__ == "__main__":
     main()
