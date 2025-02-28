@@ -13,7 +13,7 @@ The script scans the RAW range from 0 to 9998 in blocks (default 50 registers pe
 and waits a delay (default 4.0 seconds) after each block to avoid overloading the device.
 For each category, a header (including category and timestamp), the static register table,
 and the found results are appended to the output file in real time.
-If you press Ctrl+C, the scan is interrupted gracefully and a final summary report is appended.
+
   
 Usage:
   ./modbus_scanner.py --ip <IP_TARGET> [--port <PORT>] [--slave <ID>] [--block <block_size>] [--delay <seconds>] [--category <category1> <category2> ...] [--output output.txt]
@@ -79,7 +79,6 @@ def scan_category(client, block_size, delay, max_raw=9999, function_type="coil",
         count = min(block_size, max_raw - raw)
         modbus_start = raw + offset
         modbus_end = raw + count - 1 + offset
-        # Show progress only in console (do not write block progress to file)
         print(f"[{function_type.upper()}] Scanning block {idx+1}/{total_blocks} (RAW {raw}-{raw+count-1} -> Modbus {modbus_start}-{modbus_end})", end="\r", flush=True)
         
         if function_type == "coil":
@@ -112,7 +111,6 @@ def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
     lines = []
     lines.append(f"Modbus Scan Report for {ip}:{port} (Slave ID: {slave})")
     lines.append("=" * 60)
-    # The static register table is not included here to avoid duplication.
     for category, results in scan_results.items():
         lines.append(f"Category: {category.capitalize()}")
         if results:
@@ -129,7 +127,6 @@ def generate_plain_report(ip, port, slave, block_size, delay, scan_results):
 def main():
     args = parse_args()
     
-    # Open file in append mode (do not erase previous content)
     realtime_file = None
     if args.output:
         realtime_file = open(args.output, "a", encoding="utf-8")
@@ -144,7 +141,6 @@ def main():
 
     try:
         for cat in categories:
-            # Write header for each category scan with timestamp and the static table once
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             header = (
                 "\n============================\n"
@@ -156,7 +152,6 @@ def main():
             if realtime_file:
                 realtime_file.write(header)
                 realtime_file.flush()
-            # Scan current category and write found results in real time
             results = scan_category(client, block_size=args.block, delay=args.delay, max_raw=9999,
                                     function_type=cat, slave=args.slave, result_file=realtime_file)
             scan_results[cat] = results
@@ -172,7 +167,6 @@ def main():
         if realtime_file:
             realtime_file.close()
     
-    # Generate final summary report (without the static table) and append it to the output file
     final_report = generate_plain_report(args.ip, args.port, args.slave, args.block, args.delay, scan_results)
     print("\nFinal Summary Report:")
     print(final_report)
